@@ -1,15 +1,16 @@
-
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { QrCode, Scan, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
+import { QrCode, Scan, CheckCircle, XCircle, AlertTriangle, Camera } from 'lucide-react';
 import { Purchase } from '@/types/ticketing';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import AdminNav from '@/components/AdminNav';
+import QRCodeScanner from '@/components/QRCodeScanner';
 
 const QRScanner = () => {
   const [purchases, setPurchases] = useState<Purchase[]>([]);
@@ -20,30 +21,43 @@ const QRScanner = () => {
     message: string;
   }>({ type: null, purchase: null, message: '' });
   const [isManualMode, setIsManualMode] = useState(true);
+  const [isCameraActive, setIsCameraActive] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
     loadPurchases();
   }, []);
 
-  const loadPurchases = () => {
-    const savedPurchases = localStorage.getItem('purchases');
-    if (savedPurchases) {
-      const purchasesData = JSON.parse(savedPurchases).map((p: any) => ({
+  const loadPurchases = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('purchases')
+        .select('*');
+
+      if (error) {
+        console.error('Error loading purchases:', error);
+        return;
+      }
+
+      const purchasesData = data?.map((p: any) => ({
         ...p,
-        createdAt: new Date(p.createdAt)
-      }));
+        createdAt: new Date(p.created_at),
+        customerInfo: p.customer_info,
+        totalAmount: p.total_amount,
+        qrCode: p.qr_code,
+        usedTickets: p.entries_used || 0
+      })) || [];
+
       setPurchases(purchasesData);
+    } catch (error) {
+      console.error('Error loading purchases:', error);
     }
   };
 
-  const savePurchases = (updatedPurchases: Purchase[]) => {
-    localStorage.setItem('purchases', JSON.stringify(updatedPurchases));
-    setPurchases(updatedPurchases);
-  };
-
-  const handleScan = () => {
-    if (!scannedCode.trim()) {
+  const handleScan = async (qrCode?: string) => {
+    const codeToScan = qrCode || scannedCode.trim();
+    
+    if (!codeToScan) {
       toast({
         title: "Please enter a QR code",
         variant: "destructive"
@@ -51,59 +65,110 @@ const QRScanner = () => {
       return;
     }
 
-    const purchase = purchases.find(p => p.qrCode === scannedCode.trim());
-    
-    if (!purchase) {
+    try {
+      // Find purchase by QR code
+      const { data: purchaseData, error } = await supabase
+        .from('purchases')
+        .select('*')
+        .eq('qr_code', codeToScan)
+        .single();
+
+      if (error || !purchaseData) {
+        setScanResult({
+          type: 'error',
+          purchase: null,
+          message: 'Invalid QR code. This code was not found in our system.'
+        });
+        return;
+      }
+
+      const purchase = {
+        ...purchaseData,
+        createdAt: new Date(purchaseData.created_at),
+        customerInfo: purchaseData.customer_info,
+        totalAmount: purchaseData.total_amount,
+        qrCode: purchaseData.qr_code,
+        usedTickets: purchaseData.entries_used || 0
+      };
+
+      const totalTickets = purchase.max_entries || 0;
+      
+      if (purchase.usedTickets >= totalTickets) {
+        setScanResult({
+          type: 'warning',
+          purchase,
+          message: 'All tickets for this purchase have already been used for entry.'
+        });
+        return;
+      }
+
+      // Record entry
+      const { error: entryError } = await supabase
+        .from('entries')
+        .insert({
+          purchase_id: purchase.reference,
+          scanned_by: 'scanner'
+        });
+
+      if (entryError) {
+        console.error('Error recording entry:', entryError);
+        setScanResult({
+          type: 'error',
+          purchase: null,
+          message: 'Failed to record entry. Please try again.'
+        });
+        return;
+      }
+
+      // Update purchase entries count
+      const newEntriesUsed = purchase.usedTickets + 1;
+      const { error: updateError } = await supabase
+        .from('purchases')
+        .update({ entries_used: newEntriesUsed })
+        .eq('reference', purchase.reference);
+
+      if (updateError) {
+        console.error('Error updating purchase:', updateError);
+      }
+
+      const remainingTickets = totalTickets - newEntriesUsed;
+      
+      setScanResult({
+        type: 'success',
+        purchase: { ...purchase, usedTickets: newEntriesUsed },
+        message: `Entry granted! ${remainingTickets} ticket${remainingTickets !== 1 ? 's' : ''} remaining for this purchase.`
+      });
+
+      // Clear the scanned code for next scan
+      setScannedCode('');
+      setIsCameraActive(false);
+
+      toast({
+        title: "Entry granted",
+        description: `Welcome ${purchase.customerInfo.name}!`
+      });
+
+      // Reload purchases to update stats
+      loadPurchases();
+    } catch (error) {
+      console.error('Error processing scan:', error);
       setScanResult({
         type: 'error',
         purchase: null,
-        message: 'Invalid QR code. This code was not found in our system.'
+        message: 'An error occurred while processing the scan.'
       });
-      return;
     }
-
-    const totalTickets = purchase.items.reduce((total, item) => total + item.quantity, 0);
-    
-    if (purchase.usedTickets >= totalTickets) {
-      setScanResult({
-        type: 'warning',
-        purchase,
-        message: 'All tickets for this purchase have already been used for entry.'
-      });
-      return;
-    }
-
-    // Allow entry - increment used tickets
-    const updatedPurchases = purchases.map(p => {
-      if (p.id === purchase.id) {
-        return { ...p, usedTickets: p.usedTickets + 1 };
-      }
-      return p;
-    });
-    
-    savePurchases(updatedPurchases);
-    
-    const updatedPurchase = updatedPurchases.find(p => p.id === purchase.id)!;
-    const remainingTickets = totalTickets - updatedPurchase.usedTickets;
-    
-    setScanResult({
-      type: 'success',
-      purchase: updatedPurchase,
-      message: `Entry granted! ${remainingTickets} ticket${remainingTickets !== 1 ? 's' : ''} remaining for this purchase.`
-    });
-
-    // Clear the scanned code for next scan
-    setScannedCode('');
-
-    toast({
-      title: "Entry granted",
-      description: `Welcome ${purchase.customerInfo.name}!`
-    });
   };
 
   const resetScan = () => {
     setScanResult({ type: null, purchase: null, message: '' });
     setScannedCode('');
+    setIsCameraActive(false);
+  };
+
+  const handleCameraScan = (result: string) => {
+    setScannedCode(result);
+    handleScan(result);
   };
 
   const formatPrice = (amount: number) => {
@@ -137,7 +202,7 @@ const QRScanner = () => {
                   Ticket Validation
                 </CardTitle>
                 <CardDescription>
-                  {isManualMode ? 'Enter QR code manually' : 'Use camera to scan QR code'}
+                  {isManualMode ? 'Enter QR code manually or use camera to scan' : 'Use camera to scan QR code'}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
@@ -145,19 +210,24 @@ const QRScanner = () => {
                 <div className="flex gap-2">
                   <Button
                     variant={isManualMode ? "default" : "outline"}
-                    onClick={() => setIsManualMode(true)}
+                    onClick={() => {
+                      setIsManualMode(true);
+                      setIsCameraActive(false);
+                    }}
                     size="sm"
                   >
                     Manual Entry
                   </Button>
                   <Button
                     variant={!isManualMode ? "default" : "outline"}
-                    onClick={() => setIsManualMode(false)}
+                    onClick={() => {
+                      setIsManualMode(false);
+                      setIsCameraActive(true);
+                    }}
                     size="sm"
-                    disabled
                   >
-                    <Scan className="w-4 h-4 mr-2" />
-                    Camera Scan (Coming Soon)
+                    <Camera className="w-4 h-4 mr-2" />
+                    Camera Scan
                   </Button>
                 </div>
 
@@ -166,7 +236,7 @@ const QRScanner = () => {
                   <div className="space-y-4">
                     <div>
                       <Input
-                        placeholder="Enter QR code (e.g., QR_TXN_1234567890)"
+                        placeholder="Enter QR code (e.g., TICKET_TXN_1234567890)"
                         value={scannedCode}
                         onChange={(e) => setScannedCode(e.target.value)}
                         onKeyPress={(e) => e.key === 'Enter' && handleScan()}
@@ -174,7 +244,7 @@ const QRScanner = () => {
                       />
                     </div>
                     <div className="flex gap-2">
-                      <Button onClick={handleScan} className="flex-1">
+                      <Button onClick={() => handleScan()} className="flex-1">
                         <QrCode className="w-4 h-4 mr-2" />
                         Validate Ticket
                       </Button>
@@ -185,14 +255,17 @@ const QRScanner = () => {
                   </div>
                 )}
 
-                {/* Camera Placeholder */}
+                {/* Camera Scanner */}
                 {!isManualMode && (
-                  <div className="aspect-square bg-gray-100 rounded-lg flex items-center justify-center">
-                    <div className="text-center text-gray-500">
-                      <Scan className="w-16 h-16 mx-auto mb-4" />
-                      <p>Camera scanner will be available in a future update</p>
-                      <p className="text-sm">Please use manual entry for now</p>
-                    </div>
+                  <div className="text-center">
+                    <Button 
+                      onClick={() => setIsCameraActive(true)}
+                      disabled={isCameraActive}
+                      className="mb-4"
+                    >
+                      <Scan className="w-4 h-4 mr-2" />
+                      {isCameraActive ? 'Scanner Active' : 'Start Camera Scanner'}
+                    </Button>
                   </div>
                 )}
               </CardContent>
@@ -300,7 +373,7 @@ const QRScanner = () => {
                   </div>
                   <div>
                     <div className="text-2xl font-bold text-green-600">
-                      {purchases.reduce((total, p) => total + p.usedTickets, 0)}
+                      {purchases.reduce((total, p) => total + (p.usedTickets || 0), 0)}
                     </div>
                     <p className="text-sm text-gray-600">Entries Processed</p>
                   </div>
@@ -308,7 +381,7 @@ const QRScanner = () => {
                     <div className="text-2xl font-bold text-purple-600">
                       {purchases.reduce((total, p) => {
                         const totalTickets = getTotalTickets(p);
-                        return total + (totalTickets - p.usedTickets);
+                        return total + (totalTickets - (p.usedTickets || 0));
                       }, 0)}
                     </div>
                     <p className="text-sm text-gray-600">Pending Entries</p>
@@ -318,6 +391,14 @@ const QRScanner = () => {
             </Card>
           </div>
         </div>
+
+        {/* QR Code Scanner Modal */}
+        <QRCodeScanner
+          onScan={handleCameraScan}
+          onError={(error) => console.log('Scanner error:', error)}
+          isActive={isCameraActive}
+          onClose={() => setIsCameraActive(false)}
+        />
       </div>
     </ProtectedRoute>
   );

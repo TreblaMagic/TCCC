@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { TicketType } from '@/types/ticketing';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import AdminNav from '@/components/AdminNav';
 import TicketForm from '@/components/ticket-management/TicketForm';
@@ -16,26 +17,58 @@ const TicketManagement = () => {
     loadTicketTypes();
   }, []);
 
-  const loadTicketTypes = () => {
-    const savedTicketTypes = localStorage.getItem('ticketTypes');
-    if (savedTicketTypes) {
-      setTicketTypes(JSON.parse(savedTicketTypes));
+  const loadTicketTypes = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('ticket_types')
+        .select('*')
+        .order('created_at');
+
+      if (error) {
+        console.error('Error loading ticket types:', error);
+        return;
+      }
+
+      setTicketTypes(data || []);
+    } catch (error) {
+      console.error('Error loading ticket types:', error);
     }
   };
 
-  const handleTicketUpdate = (updatedTickets: TicketType[]) => {
+  const handleTicketUpdate = async (updatedTickets: TicketType[]) => {
     setTicketTypes(updatedTickets);
-    localStorage.setItem('ticketTypes', JSON.stringify(updatedTickets));
+    // Reload from database to get fresh data
+    await loadTicketTypes();
   };
 
-  const handleDelete = (ticketId: string) => {
-    const updatedTickets = ticketTypes.filter(ticket => ticket.id !== ticketId);
-    setTicketTypes(updatedTickets);
-    localStorage.setItem('ticketTypes', JSON.stringify(updatedTickets));
-    
-    toast({
-      title: "Ticket type deleted successfully"
-    });
+  const handleDelete = async (ticketId: string) => {
+    try {
+      const { error } = await supabase
+        .from('ticket_types')
+        .delete()
+        .eq('id', ticketId);
+
+      if (error) {
+        console.error('Error deleting ticket:', error);
+        toast({
+          title: "Failed to delete ticket type",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      setTicketTypes(ticketTypes.filter(ticket => ticket.id !== ticketId));
+      
+      toast({
+        title: "Ticket type deleted successfully"
+      });
+    } catch (error) {
+      console.error('Error deleting ticket:', error);
+      toast({
+        title: "Failed to delete ticket type",
+        variant: "destructive"
+      });
+    }
   };
 
   return (

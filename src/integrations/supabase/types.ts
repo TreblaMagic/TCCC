@@ -9,7 +9,140 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      [_ in never]: never
+      entries: {
+        Row: {
+          created_at: string
+          entered_at: string
+          id: string
+          purchase_id: string
+          scanned_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          entered_at?: string
+          id?: string
+          purchase_id: string
+          scanned_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          entered_at?: string
+          id?: string
+          purchase_id?: string
+          scanned_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "entries_purchase_id_fkey"
+            columns: ["purchase_id"]
+            isOneToOne: false
+            referencedRelation: "purchases"
+            referencedColumns: ["reference"]
+          },
+        ]
+      }
+      purchases: {
+        Row: {
+          created_at: string
+          customer_info: Json
+          entries_used: number | null
+          id: string
+          items: Json
+          max_entries: number | null
+          payment_verified: boolean | null
+          qr_code: string | null
+          reference: string
+          status: string
+          total_amount: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          customer_info: Json
+          entries_used?: number | null
+          id?: string
+          items: Json
+          max_entries?: number | null
+          payment_verified?: boolean | null
+          qr_code?: string | null
+          reference: string
+          status?: string
+          total_amount: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          customer_info?: Json
+          entries_used?: number | null
+          id?: string
+          items?: Json
+          max_entries?: number | null
+          payment_verified?: boolean | null
+          qr_code?: string | null
+          reference?: string
+          status?: string
+          total_amount?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      settings: {
+        Row: {
+          created_at: string
+          id: string
+          key: string
+          updated_at: string
+          value: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          key: string
+          updated_at?: string
+          value?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          key?: string
+          updated_at?: string
+          value?: string | null
+        }
+        Relationships: []
+      }
+      ticket_types: {
+        Row: {
+          available: number
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          price: number
+          total: number
+          updated_at: string
+        }
+        Insert: {
+          available?: number
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          price: number
+          total?: number
+          updated_at?: string
+        }
+        Update: {
+          available?: number
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          price?: number
+          total?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

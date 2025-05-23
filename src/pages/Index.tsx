@@ -6,9 +6,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { ShoppingCart, Plus, Minus, Calendar, MapPin, Clock } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { ShoppingCart, Plus, Minus, Calendar, MapPin, Clock, AlertCircle } from 'lucide-react';
 import { TicketType, CartItem, CustomerInfo } from '@/types/ticketing';
 import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
+import { usePaystack } from '@/hooks/usePaystack';
 
 const Index = () => {
   const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
@@ -19,38 +22,99 @@ const Index = () => {
     phone: ''
   });
   const [showCheckout, setShowCheckout] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [paystackPublicKey, setPaystackPublicKey] = useState<string>('');
+  const [isPaymentConfigured, setIsPaymentConfigured] = useState(false);
+  const { initializePayment, isLoading } = usePaystack();
   const { toast } = useToast();
 
   useEffect(() => {
-    // Load ticket types from localStorage (simulating backend)
-    const savedTicketTypes = localStorage.getItem('ticketTypes');
-    if (savedTicketTypes) {
-      setTicketTypes(JSON.parse(savedTicketTypes));
-    } else {
-      // Default ticket types
-      const defaultTickets: TicketType[] = [
-        {
-          id: '1',
-          name: 'Regular',
-          price: 5000,
-          description: 'General admission ticket',
-          available: 100,
-          total: 100
-        },
-        {
-          id: '2',
-          name: 'VIP',
-          price: 15000,
-          description: 'VIP access with premium seating',
-          available: 25,
-          total: 25
-        }
-      ];
-      setTicketTypes(defaultTickets);
-      localStorage.setItem('ticketTypes', JSON.stringify(defaultTickets));
-    }
+    loadTicketTypes();
+    loadPaymentSettings();
   }, []);
+
+  const loadTicketTypes = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('ticket_types')
+        .select('*')
+        .order('created_at');
+
+      if (error) {
+        console.error('Error loading ticket types:', error);
+        // Fallback to default tickets if database is empty
+        const defaultTickets: TicketType[] = [
+          {
+            id: '1',
+            name: 'Regular',
+            price: 5000,
+            description: 'General admission ticket',
+            available: 100,
+            total: 100
+          },
+          {
+            id: '2',
+            name: 'VIP',
+            price: 15000,
+            description: 'VIP access with premium seating',
+            available: 25,
+            total: 25
+          }
+        ];
+        setTicketTypes(defaultTickets);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        setTicketTypes(data);
+      } else {
+        // Insert default tickets if none exist
+        const defaultTickets = [
+          {
+            name: 'Regular',
+            price: 5000,
+            description: 'General admission ticket',
+            available: 100,
+            total: 100
+          },
+          {
+            name: 'VIP',
+            price: 15000,
+            description: 'VIP access with premium seating',
+            available: 25,
+            total: 25
+          }
+        ];
+
+        const { data: insertedData, error: insertError } = await supabase
+          .from('ticket_types')
+          .insert(defaultTickets)
+          .select();
+
+        if (!insertError && insertedData) {
+          setTicketTypes(insertedData);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading ticket types:', error);
+    }
+  };
+
+  const loadPaymentSettings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('settings')
+        .select('value')
+        .eq('key', 'paystack_public_key')
+        .single();
+
+      if (!error && data?.value) {
+        setPaystackPublicKey(data.value);
+        setIsPaymentConfigured(true);
+      }
+    } catch (error) {
+      console.error('Error loading payment settings:', error);
+    }
+  };
 
   const addToCart = (ticketType: TicketType) => {
     const existingItem = cart.find(item => item.ticketType.id === ticketType.id);
@@ -115,66 +179,68 @@ const Index = () => {
       return;
     }
 
-    setIsLoading(true);
+    if (!isPaymentConfigured) {
+      toast({
+        title: "Payment gateway not configured",
+        description: "Please contact the administrator",
+        variant: "destructive"
+      });
+      return;
+    }
 
     try {
-      // Simulate Paystack integration
       const reference = `TXN_${Date.now()}`;
       const totalAmount = getTotalAmount();
+      const maxEntries = cart.reduce((total, item) => total + item.quantity, 0);
 
-      // In a real implementation, you would call Paystack's API here
-      console.log('Initiating payment with Paystack:', {
+      // Create purchase record
+      const { data: purchase, error } = await supabase
+        .from('purchases')
+        .insert({
+          reference,
+          customer_info: customerInfo,
+          items: cart,
+          total_amount: totalAmount,
+          max_entries: maxEntries,
+          status: 'pending'
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error creating purchase:', error);
+        toast({
+          title: "Failed to create purchase",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // Initialize Paystack payment
+      await initializePayment({
+        publicKey: paystackPublicKey,
         email: customerInfo.email,
         amount: totalAmount,
         reference,
-        callback_url: `${window.location.origin}/payment-success`,
+        onSuccess: async (response) => {
+          // Payment successful, redirect to success page
+          window.location.href = `/payment-success?reference=${response.reference}`;
+        },
+        onCancel: () => {
+          toast({
+            title: "Payment cancelled",
+            variant: "destructive"
+          });
+        }
       });
 
-      // Simulate successful payment
-      setTimeout(() => {
-        // Generate QR code data
-        const qrCode = `QR_${reference}`;
-        
-        // Save purchase to localStorage (simulating backend)
-        const purchase = {
-          id: reference,
-          reference,
-          customerInfo,
-          items: cart,
-          totalAmount,
-          qrCode,
-          status: 'completed' as const,
-          createdAt: new Date(),
-          usedTickets: 0
-        };
-
-        const existingPurchases = JSON.parse(localStorage.getItem('purchases') || '[]');
-        localStorage.setItem('purchases', JSON.stringify([...existingPurchases, purchase]));
-
-        // Update ticket availability
-        const updatedTicketTypes = ticketTypes.map(ticketType => {
-          const cartItem = cart.find(item => item.ticketType.id === ticketType.id);
-          if (cartItem) {
-            return {
-              ...ticketType,
-              available: ticketType.available - cartItem.quantity
-            };
-          }
-          return ticketType;
-        });
-        localStorage.setItem('ticketTypes', JSON.stringify(updatedTicketTypes));
-
-        // Redirect to success page
-        window.location.href = `/payment-success?reference=${reference}`;
-      }, 2000);
-
     } catch (error) {
+      console.error('Payment error:', error);
       toast({
         title: "Payment failed",
         description: "Please try again",
         variant: "destructive"
       });
-      setIsLoading(false);
     }
   };
 
@@ -205,6 +271,15 @@ const Index = () => {
       </div>
 
       <div className="container mx-auto px-4 py-12">
+        {!isPaymentConfigured && (
+          <Alert className="mb-8 border-yellow-200 bg-yellow-50">
+            <AlertCircle className="h-4 w-4 text-yellow-600" />
+            <AlertDescription className="text-yellow-800">
+              Payment gateway is not configured. Please contact the administrator to set up payments.
+            </AlertDescription>
+          </Alert>
+        )}
+
         <div className="grid lg:grid-cols-3 gap-8">
           {/* Ticket Selection */}
           <div className="lg:col-span-2">
@@ -297,6 +372,7 @@ const Index = () => {
                       <Button 
                         onClick={() => setShowCheckout(true)} 
                         className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
+                        disabled={!isPaymentConfigured}
                       >
                         Proceed to Checkout
                       </Button>
@@ -332,7 +408,7 @@ const Index = () => {
                         </div>
                         <Button 
                           onClick={handlePayment} 
-                          disabled={isLoading}
+                          disabled={isLoading || !isPaymentConfigured}
                           className="w-full bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-700 hover:to-blue-700"
                         >
                           {isLoading ? 'Processing...' : 'Pay with Paystack'}
