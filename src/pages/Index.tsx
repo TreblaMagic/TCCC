@@ -316,7 +316,7 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen relative bg-[url('https://images.unsplash.com/photo-1464983953574-0892a716854b?auto=format&fit=crop&w=1500&q=80')] bg-cover bg-center">
+    <div className="min-h-screen relative bg-[url('/IMG_5091.jpg')] bg-cover bg-center">
       {/* Overlay for dark effect */}
       <div className="absolute inset-0 bg-[#18192a]/90 z-0" />
       <div className="relative z-10">
@@ -324,8 +324,9 @@ const Index = () => {
         <div className="py-12 bg-transparent">
           <div className="container mx-auto px-4">
             <div className="text-center">
-              <h1 className="text-5xl font-extrabold text-white mb-2 tracking-tight">TicketEase</h1>
-              <p className="text-lg text-[#b0b3c6]">Book your tickets with ease</p>
+              <h1 className="text-5xl font-extrabold text-white mb-2 tracking-tight">TCCC</h1>
+              {/* <img src="/tccc.png" alt="" className="width-500px mx-auto" /> */}
+              <p className="text-lg text-[#b0b3c6]">Where Collaboration Meets Creativity</p>
             </div>
           </div>
         </div>
