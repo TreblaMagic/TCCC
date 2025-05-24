@@ -5,12 +5,26 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { QrCode, Scan, CheckCircle, XCircle, AlertTriangle, Camera } from 'lucide-react';
-import { Purchase } from '@/types/ticketing';
+import { Purchase, CustomerInfo, CartItem, isCustomerInfo, isCartItemArray } from '@/types/ticketing';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import AdminNav from '@/components/AdminNav';
 import QRCodeScanner from '@/components/QRCodeScanner';
+import { Database } from '@/types/supabase';
+import { SupabaseClient } from '@supabase/supabase-js';
+
+interface Stats {
+  totalPurchases: number;
+  entriesProcessed: number;
+  pendingEntries: number;
+}
+
+// Add type for the RPC function
+type ValidateTicketParams = {
+  ticket_id: string;
+  purchase_id: string;
+};
 
 const QRScanner = () => {
   const [purchases, setPurchases] = useState<Purchase[]>([]);
@@ -23,140 +37,193 @@ const QRScanner = () => {
   const [isManualMode, setIsManualMode] = useState(true);
   const [isCameraActive, setIsCameraActive] = useState(false);
   const { toast } = useToast();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<Stats>({
+    totalPurchases: 0,
+    entriesProcessed: 0,
+    pendingEntries: 0
+  });
 
   useEffect(() => {
     loadPurchases();
+
+    // Subscribe to real-time changes
+    const purchaseSubscription = supabase
+      .channel('purchase_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'purchases'
+        },
+        (payload) => {
+          console.log('Real-time update:', payload);
+          loadPurchases();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      purchaseSubscription.unsubscribe();
+    };
   }, []);
 
   const loadPurchases = async () => {
     try {
-      const { data, error } = await supabase
-        .from('purchases')
-        .select('*');
+      setIsLoading(true);
+      setError(null);
 
-      if (error) {
-        console.error('Error loading purchases:', error);
-        return;
+      // Get all completed purchases
+      const { data: purchasesData, error: purchasesError } = await supabase
+        .from('purchases')
+        .select('*')
+        .eq('status', 'completed')
+        .order('created_at', { ascending: false });
+
+      if (purchasesError) {
+        throw purchasesError;
       }
 
-      const purchasesData = data?.map((p: any) => ({
-        ...p,
-        createdAt: new Date(p.created_at),
-        customerInfo: p.customer_info,
-        totalAmount: p.total_amount,
-        qrCode: p.qr_code,
-        usedTickets: p.entries_used || 0
-      })) || [];
+      // Get all entries
+      const { data: entriesData, error: entriesError } = await supabase
+        .from('entries')
+        .select('*');
 
-      setPurchases(purchasesData);
-    } catch (error) {
-      console.error('Error loading purchases:', error);
+      if (entriesError) {
+        throw entriesError;
+      }
+
+      const formattedPurchases = purchasesData.map((p: any) => {
+        const customerInfo = JSON.parse(JSON.stringify(p.customer_info));
+        const items = JSON.parse(JSON.stringify(p.items));
+
+        if (!isCustomerInfo(customerInfo)) {
+          throw new Error('Invalid customer info format');
+        }
+
+        if (!isCartItemArray(items)) {
+          throw new Error('Invalid items format');
+        }
+        
+        return {
+        id: p.id,
+        reference: p.reference,
+          customerInfo,
+          items,
+          totalAmount: p.total_amount as number,
+        qrCode: p.qr_code,
+          status: p.status as 'completed' | 'pending' | 'failed',
+        createdAt: new Date(p.created_at),
+        usedTickets: p.entries_used || 0
+        };
+      });
+
+      setPurchases(formattedPurchases);
+
+      // Calculate entry statistics
+      const totalPurchases = formattedPurchases.length;
+      const entriesProcessed = entriesData?.length || 0;
+      const pendingEntries = formattedPurchases.reduce((total, p) => {
+        const totalTickets = getTotalTickets(p);
+        return total + (totalTickets - (p.usedTickets || 0));
+      }, 0);
+
+      setStats({
+        totalPurchases,
+        entriesProcessed,
+        pendingEntries
+      });
+    } catch (err) {
+      console.error('Error loading purchases:', err);
+      setError('Failed to load purchases. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleScan = async (qrCode?: string) => {
-    const codeToScan = qrCode || scannedCode.trim();
-    
+  const handleScan = async (ticketNumber?: string) => {
+    const codeToScan = ticketNumber || scannedCode.trim();
+
     if (!codeToScan) {
       toast({
-        title: "Please enter a QR code",
+        title: "Please enter a ticket number",
         variant: "destructive"
       });
       return;
     }
 
     try {
-      // Find purchase by QR code
-      const { data: purchaseData, error } = await supabase
-        .from('purchases')
-        .select('*')
-        .eq('qr_code', codeToScan)
+      setIsLoading(true);
+      setError(null);
+
+      // Fetch the ticket by ticket_number
+      const { data: ticket, error: ticketError } = await supabase
+        .from('tickets')
+        .select(`
+          *,
+          purchase:purchases (
+            id,
+            reference,
+            customer_info,
+            items,
+            total_amount,
+            status,
+            created_at,
+            entries_used
+          )
+        `)
+        .eq('ticket_number', codeToScan)
         .single();
 
-      if (error || !purchaseData) {
+      if (ticketError || !ticket) {
         setScanResult({
           type: 'error',
           purchase: null,
-          message: 'Invalid QR code. This code was not found in our system.'
+          message: 'No ticket found for this number.'
         });
         return;
       }
 
-      const purchase = {
-        ...purchaseData,
-        createdAt: new Date(purchaseData.created_at),
-        customerInfo: purchaseData.customer_info,
-        totalAmount: purchaseData.total_amount,
-        qrCode: purchaseData.qr_code,
-        usedTickets: purchaseData.entries_used || 0
+      const customerInfo = JSON.parse(JSON.stringify(ticket.purchase.customer_info));
+      const items = JSON.parse(JSON.stringify(ticket.purchase.items));
+
+      if (!isCustomerInfo(customerInfo) || !isCartItemArray(items)) {
+        setScanResult({
+          type: 'error',
+          purchase: null,
+          message: 'Ticket data is invalid.'
+        });
+        return;
+      }
+
+      const purchase: Purchase = {
+        id: ticket.purchase.id,
+        reference: ticket.purchase.reference,
+        customerInfo,
+        items,
+        totalAmount: ticket.purchase.total_amount as number,
+        status: ticket.purchase.status as 'completed' | 'pending' | 'failed',
+        createdAt: new Date(ticket.purchase.created_at),
+        usedTickets: ticket.purchase.entries_used || 0,
+        qrCode: ticket.qr_code
       };
 
-      const totalTickets = purchase.max_entries || 0;
-      
-      if (purchase.usedTickets >= totalTickets) {
-        setScanResult({
-          type: 'warning',
-          purchase,
-          message: 'All tickets for this purchase have already been used for entry.'
-        });
-        return;
-      }
-
-      // Record entry
-      const { error: entryError } = await supabase
-        .from('entries')
-        .insert({
-          purchase_id: purchase.reference,
-          scanned_by: 'scanner'
-        });
-
-      if (entryError) {
-        console.error('Error recording entry:', entryError);
-        setScanResult({
-          type: 'error',
-          purchase: null,
-          message: 'Failed to record entry. Please try again.'
-        });
-        return;
-      }
-
-      // Update purchase entries count
-      const newEntriesUsed = purchase.usedTickets + 1;
-      const { error: updateError } = await supabase
-        .from('purchases')
-        .update({ entries_used: newEntriesUsed })
-        .eq('reference', purchase.reference);
-
-      if (updateError) {
-        console.error('Error updating purchase:', updateError);
-      }
-
-      const remainingTickets = totalTickets - newEntriesUsed;
-      
       setScanResult({
         type: 'success',
-        purchase: { ...purchase, usedTickets: newEntriesUsed },
-        message: `Entry granted! ${remainingTickets} ticket${remainingTickets !== 1 ? 's' : ''} remaining for this purchase.`
+        purchase,
+        message: 'Ticket found!'
       });
-
-      // Clear the scanned code for next scan
-      setScannedCode('');
-      setIsCameraActive(false);
-
-      toast({
-        title: "Entry granted",
-        description: `Welcome ${purchase.customerInfo.name}!`
-      });
-
-      // Reload purchases to update stats
-      loadPurchases();
     } catch (error) {
-      console.error('Error processing scan:', error);
+      console.error('Error fetching ticket:', error);
       setScanResult({
         type: 'error',
         purchase: null,
-        message: 'An error occurred while processing the scan.'
+        message: 'An error occurred while fetching the ticket.'
       });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -166,10 +233,7 @@ const QRScanner = () => {
     setIsCameraActive(false);
   };
 
-  const handleCameraScan = (result: string) => {
-    setScannedCode(result);
-    handleScan(result);
-  };
+  const handleCameraScan = handleScan;
 
   const formatPrice = (amount: number) => {
     return new Intl.NumberFormat('en-NG', {
@@ -367,22 +431,19 @@ const QRScanner = () => {
                 <div className="grid grid-cols-3 gap-4 text-center">
                   <div>
                     <div className="text-2xl font-bold text-blue-600">
-                      {purchases.length}
+                      {stats.totalPurchases}
                     </div>
                     <p className="text-sm text-gray-600">Total Purchases</p>
                   </div>
                   <div>
                     <div className="text-2xl font-bold text-green-600">
-                      {purchases.reduce((total, p) => total + (p.usedTickets || 0), 0)}
+                      {stats.entriesProcessed}
                     </div>
                     <p className="text-sm text-gray-600">Entries Processed</p>
                   </div>
                   <div>
                     <div className="text-2xl font-bold text-purple-600">
-                      {purchases.reduce((total, p) => {
-                        const totalTickets = getTotalTickets(p);
-                        return total + (totalTickets - (p.usedTickets || 0));
-                      }, 0)}
+                      {stats.pendingEntries}
                     </div>
                     <p className="text-sm text-gray-600">Pending Entries</p>
                   </div>

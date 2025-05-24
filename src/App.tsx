@@ -1,4 +1,3 @@
-
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -12,6 +11,7 @@ import TicketManagement from "./pages/TicketManagement";
 import QRScanner from "./pages/QRScanner";
 import PurchaseHistory from "./pages/PurchaseHistory";
 import PaymentSuccess from "./pages/PaymentSuccess";
+import VerifyTicket from "./pages/VerifyTicket";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -31,6 +31,7 @@ const App = () => (
             <Route path="/admin/scanner" element={<QRScanner />} />
             <Route path="/admin/purchases" element={<PurchaseHistory />} />
             <Route path="/payment-success" element={<PaymentSuccess />} />
+            <Route path="/verify-ticket/:ticketNumber" element={<VerifyTicket />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

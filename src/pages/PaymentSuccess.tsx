@@ -1,68 +1,116 @@
-
 import { useEffect, useState } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { CheckCircle, Download, Mail, QrCode } from 'lucide-react';
-import { Purchase } from '@/types/ticketing';
+import { useSearchParams } from 'react-router-dom';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
+import { TicketDisplay } from '@/components/TicketDisplay';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { AlertCircle } from 'lucide-react';
 
-const PaymentSuccess = () => {
+interface Ticket {
+  ticketNumber: string;
+  qrCode: string;
+}
+
+export default function PaymentSuccess() {
   const [searchParams] = useSearchParams();
-  const [purchase, setPurchase] = useState<Purchase | null>(null);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const { toast } = useToast();
+
   const reference = searchParams.get('reference');
 
   useEffect(() => {
-    if (reference) {
-      // Fetch purchase details from localStorage (simulating backend)
-      const purchases = JSON.parse(localStorage.getItem('purchases') || '[]');
-      const foundPurchase = purchases.find((p: Purchase) => p.reference === reference);
-      if (foundPurchase) {
-        setPurchase(foundPurchase);
+    if (!reference) {
+      setError('No purchase reference found');
+      setLoading(false);
+      return;
+    }
+
+    const verifyPayment = async () => {
+      try {
+        // Get verification key from environment
+        const verificationKey = import.meta.env.VITE_PAYMENT_VERIFICATION_KEY;
+        if (!verificationKey) {
+          console.error('Payment verification key not configured');
+          throw new Error('Payment verification key not configured');
+        }
+
+        console.log('Starting payment verification for reference:', reference);
+        
+        // Call the Edge Function to verify payment and get tickets
+        const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/verify-payment`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`
+          },
+          body: JSON.stringify({
+            reference,
+            verificationKey
+          })
+        });
+
+        console.log('Edge Function response status:', response.status);
+        const data = await response.json();
+        console.log('Edge Function response data:', data);
+
+        if (!response.ok) {
+          console.error('Payment verification failed:', {
+            status: response.status,
+            statusText: response.statusText,
+            data: data
+          });
+          throw new Error(data.error || data.details || 'Failed to verify payment');
+        }
+
+        if (data.status === 'success' && data.data.tickets) {
+          console.log('Payment verified successfully, tickets:', data.data.tickets);
+          setTickets(data.data.tickets);
+        } else {
+          console.error('Invalid response format:', data);
+          throw new Error('No tickets found in response');
+        }
+      } catch (error) {
+        console.error('Error verifying payment:', {
+          error,
+          message: error instanceof Error ? error.message : 'Unknown error',
+          stack: error instanceof Error ? error.stack : undefined
+        });
+        setError(error instanceof Error ? error.message : 'Failed to verify payment');
+        toast({
+          title: "Error",
+          description: error instanceof Error ? error.message : "Failed to verify payment. Please contact support.",
+          variant: "destructive"
+        });
+      } finally {
+        setLoading(false);
       }
-    }
-  }, [reference]);
+    };
 
-  const formatPrice = (amount: number) => {
-    return new Intl.NumberFormat('en-NG', {
-      style: 'currency',
-      currency: 'NGN'
-    }).format(amount / 100);
-  };
+    verifyPayment();
+  }, [reference, toast]);
 
-  const generateQRCodeDataURL = (qrCode: string) => {
-    // In a real implementation, you would use a QR code library like qrcode
-    // For demo purposes, we'll create a simple data URL
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = 200;
-    canvas.height = 200;
-    
-    if (ctx) {
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, 200, 200);
-      ctx.fillStyle = '#000000';
-      ctx.font = '12px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText('QR Code:', 100, 50);
-      ctx.fillText(qrCode, 100, 70);
-      ctx.fillText('(Demo QR)', 100, 150);
-    }
-    
-    return canvas.toDataURL();
-  };
-
-  if (!purchase) {
+  if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-100 flex items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardContent className="p-8 text-center">
-            <p className="text-gray-600">Purchase not found or still processing...</p>
-            <Link to="/">
-              <Button className="mt-4">Return to Home</Button>
-            </Link>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold mb-4">Verifying your payment...</h2>
+          <p className="text-gray-600">Please wait while we process your tickets.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="max-w-md w-full">
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        </div>
       </div>
     );
   }
@@ -70,119 +118,8 @@ const PaymentSuccess = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-100 py-12">
       <div className="container mx-auto px-4">
-        <div className="max-w-2xl mx-auto">
-          {/* Success Header */}
-          <Card className="mb-8 border-green-200 bg-green-50">
-            <CardContent className="p-8 text-center">
-              <CheckCircle className="w-16 h-16 text-green-600 mx-auto mb-4" />
-              <h1 className="text-3xl font-bold text-green-800 mb-2">Payment Successful!</h1>
-              <p className="text-green-700">Your tickets have been purchased successfully.</p>
-            </CardContent>
-          </Card>
-
-          {/* Purchase Details */}
-          <Card className="mb-8">
-            <CardHeader>
-              <CardTitle>Purchase Details</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4">
-                <div className="flex justify-between">
-                  <span className="font-medium">Reference:</span>
-                  <Badge variant="outline">{purchase.reference}</Badge>
-                </div>
-                <div className="flex justify-between">
-                  <span className="font-medium">Customer:</span>
-                  <span>{purchase.customerInfo.name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="font-medium">Email:</span>
-                  <span>{purchase.customerInfo.email}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="font-medium">Phone:</span>
-                  <span>{purchase.customerInfo.phone}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="font-medium">Total Amount:</span>
-                  <span className="font-bold text-purple-600">
-                    {formatPrice(purchase.totalAmount)}
-                  </span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Ticket Details */}
-          <Card className="mb-8">
-            <CardHeader>
-              <CardTitle>Ticket Details</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {purchase.items.map((item, index) => (
-                  <div key={index} className="flex justify-between items-center p-4 bg-gray-50 rounded-lg">
-                    <div>
-                      <h3 className="font-semibold">{item.ticketType.name}</h3>
-                      <p className="text-sm text-gray-600">{item.ticketType.description}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-medium">Quantity: {item.quantity}</p>
-                      <p className="text-sm text-gray-600">
-                        {formatPrice(item.ticketType.price)} each
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* QR Code */}
-          <Card className="mb-8">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <QrCode className="w-5 h-5" />
-                Your Entry QR Code
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-center">
-              <div className="inline-block p-4 bg-white border-2 border-gray-200 rounded-lg mb-4">
-                <img 
-                  src={generateQRCodeDataURL(purchase.qrCode)}
-                  alt="Entry QR Code"
-                  className="w-48 h-48 mx-auto"
-                />
-              </div>
-              <p className="text-sm text-gray-600 mb-4">
-                Present this QR code at the event entrance for entry
-              </p>
-              <p className="font-mono text-sm bg-gray-100 p-2 rounded">
-                {purchase.qrCode}
-              </p>
-            </CardContent>
-          </Card>
-
-          {/* Actions */}
-          <div className="flex flex-col sm:flex-row gap-4">
-            <Button className="flex-1" variant="outline">
-              <Download className="w-4 h-4 mr-2" />
-              Download Receipt
-            </Button>
-            <Button className="flex-1" variant="outline">
-              <Mail className="w-4 h-4 mr-2" />
-              Email Receipt
-            </Button>
-            <Link to="/" className="flex-1">
-              <Button className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700">
-                Buy More Tickets
-              </Button>
-            </Link>
-          </div>
-        </div>
+        <TicketDisplay tickets={tickets} purchaseReference={reference || ''} />
       </div>
     </div>
   );
-};
-
-export default PaymentSuccess;
+}

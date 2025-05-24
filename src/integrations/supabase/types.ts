@@ -143,6 +143,52 @@ export type Database = {
         }
         Relationships: []
       }
+      tickets: {
+        Row: {
+          id: string
+          ticket_number: string
+          qr_code: string
+          purchase_id: string
+          ticket_type_id: string
+          status: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          ticket_number: string
+          qr_code: string
+          purchase_id: string
+          ticket_type_id: string
+          status: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          ticket_number?: string
+          qr_code?: string
+          purchase_id?: string
+          ticket_type_id?: string
+          status?: string
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tickets_purchase_id_fkey"
+            columns: ["purchase_id"]
+            referencedRelation: "purchases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tickets_ticket_type_id_fkey"
+            columns: ["ticket_type_id"]
+            referencedRelation: "ticket_types"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never

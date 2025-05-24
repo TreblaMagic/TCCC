@@ -1,6 +1,5 @@
-
 import { useState, useEffect, useRef } from 'react';
-import { Html5QrcodeScanner, Html5QrcodeScannerConfig } from 'html5-qrcode';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -19,7 +18,7 @@ const QRCodeScanner = ({ onScan, onError, isActive, onClose }: QRCodeScannerProp
 
   useEffect(() => {
     if (isActive && scannerRef.current) {
-      const config: Html5QrcodeScannerConfig = {
+      const config = {
         fps: 10,
         qrbox: { width: 250, height: 250 },
         aspectRatio: 1.0,

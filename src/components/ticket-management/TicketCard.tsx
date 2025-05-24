@@ -1,4 +1,3 @@
-
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -31,6 +30,17 @@ const TicketCard = ({ ticket, onEdit, onDelete }: TicketCardProps) => {
               <Badge variant={ticket.available > 0 ? "default" : "destructive"}>
                 {ticket.available > 0 ? 'Available' : 'Sold Out'}
               </Badge>
+            </div>
+            <div className="flex flex-wrap gap-4 mb-2 text-sm text-gray-700">
+              {ticket.date && (
+                <span className="flex items-center gap-1"><span role="img" aria-label="date">📅</span>{ticket.date}</span>
+              )}
+              {ticket.time && (
+                <span className="flex items-center gap-1"><span role="img" aria-label="time">⏰</span>{ticket.time}</span>
+              )}
+              {ticket.location && (
+                <span className="flex items-center gap-1"><span role="img" aria-label="location">📍</span>{ticket.location}</span>
+              )}
             </div>
             <p className="text-gray-600 mb-3">{ticket.description}</p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">

@@ -3,35 +3,99 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TicketType, Purchase } from '@/types/ticketing';
-import { Ticket, DollarSign, Users, TrendingUp, Settings } from 'lucide-react';
+import { Ticket, DollarSign, Users, TrendingUp, Settings, RefreshCw } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import AdminNav from '@/components/AdminNav';
 import PaymentGatewaySettings from '@/components/PaymentGatewaySettings';
+import { Button } from '@/components/ui/button';
+import { toast } from '@/components/ui/use-toast';
 
 const AdminDashboard = () => {
   const [ticketTypes, setTicketTypes] = useState<TicketType[]>([]);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     loadData();
+
+    // Subscribe to real-time changes
+    const ticketSubscription = supabase
+      .channel('ticket_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'ticket_types'
+        },
+        (payload) => {
+          console.log('Real-time ticket update:', payload);
+          loadData();
+        }
+      )
+      .subscribe();
+
+    const purchaseSubscription = supabase
+      .channel('purchase_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'purchases'
+        },
+        (payload) => {
+          console.log('Real-time purchase update:', payload);
+          loadData();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      ticketSubscription.unsubscribe();
+      purchaseSubscription.unsubscribe();
+    };
   }, []);
 
   const loadData = async () => {
     try {
+      setIsLoading(true);
+      
       // Load ticket types
-      const { data: ticketTypesData } = await supabase
+      const { data: ticketTypesData, error: ticketsError } = await supabase
         .from('ticket_types')
-        .select('*');
+        .select('*')
+        .order('created_at');
+
+      if (ticketsError) throw ticketsError;
 
       // Load purchases
-      const { data: purchasesData } = await supabase
+      const { data: purchasesData, error: purchasesError } = await supabase
         .from('purchases')
         .select('*')
+        .eq('status', 'completed')
         .order('created_at', { ascending: false });
 
+      if (purchasesError) throw purchasesError;
+
       if (ticketTypesData) {
-        setTicketTypes(ticketTypesData);
+        // Calculate sold tickets for each type
+        const ticketsWithSales = ticketTypesData.map(ticket => {
+          const soldTickets = purchasesData.reduce((total, purchase) => {
+            const ticketItems = purchase.items.filter((item: any) => 
+              item.ticketType.id === ticket.id
+            );
+            return total + ticketItems.reduce((sum: number, item: any) => sum + item.quantity, 0);
+          }, 0);
+
+          return {
+            ...ticket,
+            available: ticket.total - soldTickets
+          };
+        });
+
+        setTicketTypes(ticketsWithSales);
       }
 
       if (purchasesData) {
@@ -47,6 +111,13 @@ const AdminDashboard = () => {
       }
     } catch (error) {
       console.error('Error loading data:', error);
+      toast({
+        title: "Failed to load dashboard data",
+        description: error instanceof Error ? error.message : 'Unknown error occurred',
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -84,9 +155,19 @@ const AdminDashboard = () => {
         <AdminNav />
         
         <div className="container mx-auto px-4 py-8">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold mb-2">Admin Dashboard</h1>
-            <p className="text-gray-600">Overview of your event ticketing system</p>
+          <div className="flex justify-between items-center mb-8">
+            <div>
+              <h1 className="text-3xl font-bold mb-2">Admin Dashboard</h1>
+              <p className="text-gray-600">Overview of your event ticketing system</p>
+            </div>
+            <Button
+              variant="outline"
+              onClick={loadData}
+              disabled={isLoading}
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
           </div>
 
           <Tabs defaultValue="overview" className="space-y-6">
@@ -138,10 +219,10 @@ const AdminDashboard = () => {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-purple-600">
-                      {purchases.length}
+                      {new Set(purchases.map(p => p.customerInfo.email)).size}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Unique purchases
+                      Unique customers
                     </p>
                   </CardContent>
                 </Card>
@@ -162,7 +243,7 @@ const AdminDashboard = () => {
                 </Card>
               </div>
 
-              <div className="grid lg:grid-cols-2 gap-8">
+              <div className="grid gap-6">
                 {/* Ticket Types Overview */}
                 <Card>
                   <CardHeader>
@@ -170,37 +251,44 @@ const AdminDashboard = () => {
                     <CardDescription>Current availability and sales</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-4">
-                      {ticketTypes.map((ticket) => {
-                        const sold = getTicketsSoldByType()[ticket.name] || 0;
-                        const percentage = ticket.total > 0 ? (sold / ticket.total) * 100 : 0;
-                        
-                        return (
-                          <div key={ticket.id} className="space-y-2">
-                            <div className="flex justify-between items-center">
-                              <div>
-                                <h4 className="font-medium">{ticket.name}</h4>
-                                <p className="text-sm text-gray-600">{formatPrice(ticket.price)}</p>
+                    {isLoading ? (
+                      <div className="text-center py-8">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
+                        <p className="mt-2 text-gray-600">Loading ticket data...</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {ticketTypes.map((ticket) => {
+                          const sold = getTicketsSoldByType()[ticket.name] || 0;
+                          const percentage = ticket.total > 0 ? (sold / ticket.total) * 100 : 0;
+                          
+                          return (
+                            <div key={ticket.id} className="space-y-2">
+                              <div className="flex justify-between items-center">
+                                <div>
+                                  <h4 className="font-medium">{ticket.name}</h4>
+                                  <p className="text-sm text-gray-600">{formatPrice(ticket.price)}</p>
+                                </div>
+                                <div className="text-right">
+                                  <Badge variant={ticket.available > 0 ? "default" : "destructive"}>
+                                    {ticket.available} available
+                                  </Badge>
+                                  <p className="text-sm text-gray-600 mt-1">
+                                    {sold} sold
+                                  </p>
+                                </div>
                               </div>
-                              <div className="text-right">
-                                <Badge variant={ticket.available > 0 ? "default" : "destructive"}>
-                                  {ticket.available} available
-                                </Badge>
-                                <p className="text-sm text-gray-600 mt-1">
-                                  {sold} sold
-                                </p>
+                              <div className="w-full bg-gray-200 rounded-full h-2">
+                                <div
+                                  className="bg-gradient-to-r from-purple-600 to-blue-600 h-2 rounded-full transition-all"
+                                  style={{ width: `${percentage}%` }}
+                                ></div>
                               </div>
                             </div>
-                            <div className="w-full bg-gray-200 rounded-full h-2">
-                              <div
-                                className="bg-gradient-to-r from-purple-600 to-blue-600 h-2 rounded-full transition-all"
-                                style={{ width: `${percentage}%` }}
-                              ></div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
 
@@ -211,30 +299,37 @@ const AdminDashboard = () => {
                     <CardDescription>Latest ticket purchases</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-4">
-                      {purchases.slice(0, 5).map((purchase) => (
-                        <div key={purchase.id} className="flex justify-between items-start p-4 bg-gray-50 rounded-lg">
-                          <div>
-                            <h4 className="font-medium">{purchase.customerInfo.name}</h4>
-                            <p className="text-sm text-gray-600">{purchase.customerInfo.email}</p>
-                            <p className="text-xs text-gray-500">
-                              {new Date(purchase.createdAt).toLocaleDateString()}
-                            </p>
+                    {isLoading ? (
+                      <div className="text-center py-8">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
+                        <p className="mt-2 text-gray-600">Loading purchase data...</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {purchases.slice(0, 5).map((purchase) => (
+                          <div key={purchase.id} className="flex justify-between items-start p-4 bg-gray-50 rounded-lg">
+                            <div>
+                              <h4 className="font-medium">{purchase.customerInfo.name}</h4>
+                              <p className="text-sm text-gray-600">{purchase.customerInfo.email}</p>
+                              <p className="text-xs text-gray-500">
+                                {new Date(purchase.createdAt).toLocaleDateString()}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-semibold text-green-600">
+                                {formatPrice(purchase.totalAmount)}
+                              </p>
+                              <Badge variant="outline" className="mt-1">
+                                {purchase.items.reduce((total, item) => total + item.quantity, 0)} tickets
+                              </Badge>
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <p className="font-semibold text-green-600">
-                              {formatPrice(purchase.totalAmount)}
-                            </p>
-                            <Badge variant="outline" className="mt-1">
-                              {purchase.items.reduce((total, item) => total + item.quantity, 0)} tickets
-                            </Badge>
-                          </div>
-                        </div>
-                      ))}
-                      {purchases.length === 0 && (
-                        <p className="text-center text-gray-500 py-8">No purchases yet</p>
-                      )}
-                    </div>
+                        ))}
+                        {purchases.length === 0 && (
+                          <p className="text-center text-gray-500 py-8">No purchases yet</p>
+                        )}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </div>

@@ -9,6 +9,12 @@
     "paths": {
       "@/*": ["./src/*"]
     },
+    "compilerOptions": {
+       "baseUrl": "src",
+       "paths": {
+         "@/*": ["*"]
+       }
+     },
     "noImplicitAny": false,
     "noUnusedParameters": false,
     "skipLibCheck": true,

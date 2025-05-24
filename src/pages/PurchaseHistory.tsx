@@ -1,47 +1,108 @@
-
 import { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { AlertCircle, Receipt, RefreshCw, Trash2 } from 'lucide-react';
 import { Purchase } from '@/types/ticketing';
-import { Search, Download, Eye } from 'lucide-react';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { supabase } from '@/integrations/supabase/client';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import AdminNav from '@/components/AdminNav';
+import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { toast } from "@/components/ui/use-toast";
 
 const PurchaseHistory = () => {
   const [purchases, setPurchases] = useState<Purchase[]>([]);
-  const [filteredPurchases, setFilteredPurchases] = useState<Purchase[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedPurchase, setSelectedPurchase] = useState<Purchase | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState({
+    totalRevenue: 0,
+    totalPurchases: 0,
+    totalCustomers: 0,
+    averageOrderValue: 0
+  });
 
   useEffect(() => {
     loadPurchases();
+
+    // Subscribe to real-time changes
+    const purchaseSubscription = supabase
+      .channel('purchase_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'purchases'
+        },
+        (payload) => {
+          console.log('Real-time update:', payload);
+          loadPurchases();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      purchaseSubscription.unsubscribe();
+    };
   }, []);
 
-  useEffect(() => {
-    if (searchTerm) {
-      const filtered = purchases.filter(purchase =>
-        purchase.customerInfo.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        purchase.customerInfo.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        purchase.reference.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-      setFilteredPurchases(filtered);
-    } else {
-      setFilteredPurchases(purchases);
-    }
-  }, [searchTerm, purchases]);
+  const loadPurchases = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
 
-  const loadPurchases = () => {
-    const savedPurchases = localStorage.getItem('purchases');
-    if (savedPurchases) {
-      const purchasesData = JSON.parse(savedPurchases).map((p: any) => ({
-        ...p,
-        createdAt: new Date(p.createdAt)
+      const { data, error } = await supabase
+        .from('purchases')
+        .select('*')
+        .eq('status', 'completed')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      const formattedPurchases = data.map((p: any) => ({
+        id: p.id,
+        reference: p.reference,
+        customerInfo: p.customer_info,
+        items: p.items,
+        totalAmount: p.total_amount,
+        qrCode: p.qr_code,
+        status: p.status,
+        createdAt: new Date(p.created_at),
+        usedTickets: p.entries_used || 0
       }));
-      setPurchases(purchasesData);
-      setFilteredPurchases(purchasesData);
+
+      setPurchases(formattedPurchases);
+
+      // Calculate stats
+      const uniqueCustomers = new Set(formattedPurchases.map(p => p.customerInfo.email));
+      const totalRevenue = formattedPurchases.reduce((sum, p) => sum + p.totalAmount, 0);
+      const totalPurchases = formattedPurchases.length;
+      const averageOrderValue = totalPurchases > 0 ? totalRevenue / totalPurchases : 0;
+
+      setStats({
+        totalRevenue,
+        totalPurchases,
+        totalCustomers: uniqueCustomers.size,
+        averageOrderValue
+      });
+    } catch (err) {
+      console.error('Error loading purchases:', err);
+      setError('Failed to load purchases. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -52,33 +113,92 @@ const PurchaseHistory = () => {
     }).format(amount / 100);
   };
 
-  const getTotalTickets = (purchase: Purchase) => {
-    return purchase.items.reduce((total, item) => total + item.quantity, 0);
+  const formatDate = (date: Date) => {
+    return new Intl.DateTimeFormat('en-NG', {
+      dateStyle: 'medium',
+      timeStyle: 'short'
+    }).format(date);
   };
 
-  const getTotalRevenue = () => {
-    return filteredPurchases.reduce((total, purchase) => total + purchase.totalAmount, 0);
-  };
-
-  const generateQRCodeDataURL = (qrCode: string) => {
-    // Simple QR code representation for demo
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = 150;
-    canvas.height = 150;
-    
-    if (ctx) {
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, 150, 150);
-      ctx.fillStyle = '#000000';
-      ctx.font = '10px Arial';
-      ctx.textAlign = 'center';
-      ctx.fillText('QR Code:', 75, 40);
-      ctx.fillText(qrCode, 75, 55);
-      ctx.fillText('(Demo)', 75, 110);
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'completed':
+        return 'bg-green-100 text-green-800';
+      case 'pending':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'failed':
+        return 'bg-red-100 text-red-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
     }
-    
-    return canvas.toDataURL();
+  };
+
+  const clearHistory = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      // 1. Get all completed purchase IDs
+      const { data: purchasesToDelete, error: fetchError } = await supabase
+        .from('purchases')
+        .select('id')
+        .eq('status', 'completed');
+
+      if (fetchError) throw fetchError;
+
+      const purchaseIds = purchasesToDelete.map((p: { id: string }) => p.id);
+
+      if (purchaseIds.length > 0) {
+        // 2. Delete all tickets for these purchases (regardless of status)
+        const { error: ticketsError } = await supabase
+          .from('tickets')
+          .delete()
+          .in('purchase_id', purchaseIds);
+
+        if (ticketsError) {
+          console.error('Error deleting tickets:', ticketsError);
+          throw ticketsError;
+        }
+
+        // 3. Delete the purchases
+        const { error: purchasesError } = await supabase
+          .from('purchases')
+          .delete()
+          .eq('status', 'completed');
+
+        if (purchasesError) {
+          console.error('Error deleting purchases:', purchasesError);
+          throw purchasesError;
+        }
+
+        // Reset local state
+        setPurchases([]);
+        setStats({
+          totalRevenue: 0,
+          totalPurchases: 0,
+          totalCustomers: 0,
+          averageOrderValue: 0
+        });
+
+        toast({
+          title: "Purchase history cleared successfully"
+        });
+      } else {
+        toast({
+          title: "No completed purchases to clear"
+        });
+      }
+    } catch (err) {
+      console.error('Error clearing purchase history:', err);
+      setError('Failed to clear purchase history. Please try again.');
+      toast({
+        title: "Failed to clear purchase history",
+        description: err instanceof Error ? err.message : 'Unknown error occurred',
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -87,212 +207,169 @@ const PurchaseHistory = () => {
         <AdminNav />
         
         <div className="container mx-auto px-4 py-8">
-          <div className="mb-8">
+          <div className="max-w-4xl mx-auto">
+            <div className="flex justify-between items-center mb-8">
+              <div>
             <h1 className="text-3xl font-bold mb-2">Purchase History</h1>
-            <p className="text-gray-600">View and manage all ticket purchases</p>
-          </div>
-
-          {/* Stats and Search */}
-          <div className="grid md:grid-cols-3 gap-6 mb-8">
-            <Card>
-              <CardContent className="p-6">
-                <div className="text-2xl font-bold text-green-600">
-                  {formatPrice(getTotalRevenue())}
-                </div>
-                <p className="text-sm text-gray-600">Total Revenue</p>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardContent className="p-6">
-                <div className="text-2xl font-bold text-blue-600">
-                  {filteredPurchases.length}
-                </div>
-                <p className="text-sm text-gray-600">Total Purchases</p>
-              </CardContent>
-            </Card>
-            
-            <div className="flex items-end">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <Input
-                  placeholder="Search by name, email, or reference..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
+                <p className="text-gray-600">View all ticket purchases and statistics</p>
               </div>
-            </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={loadPurchases}
+                  disabled={isLoading}
+                >
+                  <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" disabled={isLoading || purchases.length === 0}>
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Clear History
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Clear Purchase History</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This action will permanently delete all completed purchase records. This action cannot be undone.
+                        Are you sure you want to continue?
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={clearHistory}>Clear History</AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </div>
           </div>
 
-          {/* Purchase List */}
+            {/* Stats Cards */}
+            <div className="grid grid-cols-4 gap-4 mb-8">
+              <Card>
+                <CardContent className="p-4">
+                  <p className="text-sm text-gray-500">Total Revenue</p>
+                  <p className="text-2xl font-bold text-green-600">
+                    {formatPrice(stats.totalRevenue)}
+                  </p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <p className="text-sm text-gray-500">Total Purchases</p>
+                  <p className="text-2xl font-bold text-blue-600">
+                    {stats.totalPurchases}
+                  </p>
+                </CardContent>
+              </Card>
+            <Card>
+                <CardContent className="p-4">
+                  <p className="text-sm text-gray-500">Total Customers</p>
+                  <p className="text-2xl font-bold text-purple-600">
+                    {stats.totalCustomers}
+                  </p>
+              </CardContent>
+            </Card>
+            <Card>
+                <CardContent className="p-4">
+                  <p className="text-sm text-gray-500">Average Order Value</p>
+                  <p className="text-2xl font-bold text-orange-600">
+                    {formatPrice(stats.averageOrderValue)}
+                  </p>
+              </CardContent>
+            </Card>
+            </div>
+
+            {error && (
+              <Alert className="mb-8 border-red-200 bg-red-50">
+                <AlertCircle className="h-4 w-4 text-red-600" />
+                <AlertDescription className="text-red-800">
+                  {error}
+                </AlertDescription>
+              </Alert>
+            )}
+
           <Card>
             <CardHeader>
-              <CardTitle>All Purchases</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <Receipt className="w-5 h-5" />
+                  All Purchases
+                </CardTitle>
               <CardDescription>
-                {filteredPurchases.length} purchase{filteredPurchases.length !== 1 ? 's' : ''} found
+                  {purchases.length} purchase{purchases.length !== 1 ? 's' : ''} found
               </CardDescription>
             </CardHeader>
             <CardContent>
+                {isLoading ? (
+                  <div className="text-center py-8">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 mx-auto"></div>
+                    <p className="mt-2 text-gray-600">Loading purchases...</p>
+                  </div>
+                ) : purchases.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    No purchases found
+                  </div>
+                ) : (
               <div className="space-y-4">
-                {filteredPurchases.map((purchase) => (
-                  <div key={purchase.id} className="border rounded-lg p-4 hover:bg-gray-50 transition-colors">
-                    <div className="flex justify-between items-start">
-                      <div className="grid md:grid-cols-4 gap-4 flex-1">
+                    {purchases.map((purchase) => (
+                      <Card key={purchase.id} className="hover:shadow-md transition-shadow">
+                        <CardContent className="p-4">
+                          <div className="flex justify-between items-start mb-2">
                         <div>
-                          <p className="font-semibold">{purchase.customerInfo.name}</p>
+                              <h3 className="font-semibold">{purchase.customerInfo.name}</h3>
                           <p className="text-sm text-gray-600">{purchase.customerInfo.email}</p>
-                          <p className="text-sm text-gray-600">{purchase.customerInfo.phone}</p>
+                            </div>
+                            <Badge className={getStatusColor(purchase.status)}>
+                              {purchase.status}
+                            </Badge>
                         </div>
                         
+                          <div className="grid md:grid-cols-2 gap-4 mt-4">
                         <div>
                           <p className="text-sm text-gray-500">Reference</p>
                           <p className="font-mono text-sm">{purchase.reference}</p>
-                          <p className="text-sm text-gray-500">
-                            {purchase.createdAt.toLocaleDateString()}
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-500">Date</p>
+                              <p className="text-sm">{formatDate(purchase.createdAt)}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm text-gray-500">Amount</p>
+                              <p className="font-semibold text-green-600">
+                                {formatPrice(purchase.totalAmount)}
                           </p>
                         </div>
-                        
                         <div>
                           <p className="text-sm text-gray-500">Tickets</p>
-                          <div className="space-y-1">
-                            {purchase.items.map((item, index) => (
-                              <p key={index} className="text-sm">
-                                {item.quantity}x {item.ticketType.name}
+                              <p className="text-sm">
+                                {purchase.items.reduce((total, item) => total + item.quantity, 0)} tickets
                               </p>
-                            ))}
                           </div>
                         </div>
                         
-                        <div>
-                          <p className="text-sm text-gray-500">Total</p>
-                          <p className="font-semibold text-lg text-green-600">
-                            {formatPrice(purchase.totalAmount)}
-                          </p>
-                          <Badge 
-                            variant={purchase.status === 'completed' ? 'default' : 'destructive'}
-                            className="mt-1"
-                          >
-                            {purchase.status}
-                          </Badge>
-                        </div>
-                      </div>
-                      
-                      <div className="flex gap-2 ml-4">
-                        <Dialog>
-                          <DialogTrigger asChild>
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              onClick={() => setSelectedPurchase(purchase)}
-                            >
-                              <Eye className="w-4 h-4" />
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent className="max-w-2xl">
-                            <DialogHeader>
-                              <DialogTitle>Purchase Details</DialogTitle>
-                              <DialogDescription>
-                                Complete information for purchase {purchase.reference}
-                              </DialogDescription>
-                            </DialogHeader>
-                            
-                            {selectedPurchase && (
-                              <div className="space-y-6">
-                                {/* Customer Info */}
-                                <div>
-                                  <h3 className="font-semibold mb-2">Customer Information</h3>
-                                  <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
-                                    <div>
-                                      <p className="text-sm text-gray-500">Name</p>
-                                      <p className="font-medium">{selectedPurchase.customerInfo.name}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-sm text-gray-500">Email</p>
-                                      <p className="font-medium">{selectedPurchase.customerInfo.email}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-sm text-gray-500">Phone</p>
-                                      <p className="font-medium">{selectedPurchase.customerInfo.phone}</p>
-                                    </div>
-                                    <div>
-                                      <p className="text-sm text-gray-500">Reference</p>
-                                      <p className="font-mono text-sm">{selectedPurchase.reference}</p>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* Ticket Details */}
-                                <div>
-                                  <h3 className="font-semibold mb-2">Ticket Details</h3>
-                                  <div className="space-y-2">
-                                    {selectedPurchase.items.map((item, index) => (
-                                      <div key={index} className="flex justify-between items-center p-3 bg-gray-50 rounded">
-                                        <div>
-                                          <p className="font-medium">{item.ticketType.name}</p>
-                                          <p className="text-sm text-gray-600">{item.ticketType.description}</p>
-                                        </div>
-                                        <div className="text-right">
-                                          <p className="font-medium">Qty: {item.quantity}</p>
-                                          <p className="text-sm text-gray-600">
-                                            {formatPrice(item.ticketType.price * item.quantity)}
-                                          </p>
-                                        </div>
+                          <div className="mt-4">
+                            <p className="text-sm text-gray-500 mb-2">Items</p>
+                            <div className="space-y-1">
+                              {purchase.items.map((item, index) => (
+                                <div key={index} className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                                  <span>{item.ticketType.name}</span>
+                                  <span className="text-sm text-gray-600">
+                                    Qty: {item.quantity}
+                                  </span>
                                       </div>
                                     ))}
                                   </div>
                                 </div>
-
-                                {/* QR Code */}
-                                <div>
-                                  <h3 className="font-semibold mb-2">Entry QR Code</h3>
-                                  <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
-                                    <img 
-                                      src={generateQRCodeDataURL(selectedPurchase.qrCode)}
-                                      alt="QR Code"
-                                      className="w-24 h-24"
-                                    />
-                                    <div>
-                                      <p className="font-mono text-sm mb-2">{selectedPurchase.qrCode}</p>
-                                      <p className="text-sm text-gray-600">
-                                        Tickets used: {selectedPurchase.usedTickets}/{getTotalTickets(selectedPurchase)}
-                                      </p>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* Total */}
-                                <div className="border-t pt-4">
-                                  <div className="flex justify-between items-center">
-                                    <span className="text-lg font-semibold">Total Amount:</span>
-                                    <span className="text-2xl font-bold text-green-600">
-                                      {formatPrice(selectedPurchase.totalAmount)}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                          </DialogContent>
-                        </Dialog>
-                        
-                        <Button variant="outline" size="sm">
-                          <Download className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                
-                {filteredPurchases.length === 0 && (
-                  <div className="text-center py-12">
-                    <p className="text-gray-500">
-                      {searchTerm ? 'No purchases found matching your search.' : 'No purchases yet.'}
-                    </p>
+                        </CardContent>
+                      </Card>
+                    ))}
                   </div>
                 )}
-              </div>
             </CardContent>
           </Card>
+          </div>
         </div>
       </div>
     </ProtectedRoute>

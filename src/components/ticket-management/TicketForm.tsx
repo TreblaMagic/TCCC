@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,6 +18,9 @@ const TicketForm = ({ ticketTypes, onTicketUpdate }: TicketFormProps) => {
   const [formData, setFormData] = useState({
     name: '',
     price: '',
+    date: '',
+    time: '',
+    location: '',
     description: '',
     total: ''
   });
@@ -28,6 +30,9 @@ const TicketForm = ({ ticketTypes, onTicketUpdate }: TicketFormProps) => {
     setFormData({
       name: '',
       price: '',
+      date: '',
+      time: '',
+      location: '',
       description: '',
       total: ''
     });
@@ -39,6 +44,9 @@ const TicketForm = ({ ticketTypes, onTicketUpdate }: TicketFormProps) => {
     setFormData({
       name: ticket.name,
       price: (ticket.price / 100).toString(),
+      date: ticket.date || '',
+      time: ticket.time || '',
+      location: ticket.location || '',
       description: ticket.description,
       total: ticket.total.toString()
     });
@@ -48,7 +56,7 @@ const TicketForm = ({ ticketTypes, onTicketUpdate }: TicketFormProps) => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.name || !formData.price || !formData.description || !formData.total) {
+    if (!formData.name || !formData.price || !formData.date || !formData.time || !formData.location || !formData.description || !formData.total) {
       toast({
         title: "Please fill all fields",
         variant: "destructive"
@@ -59,9 +67,10 @@ const TicketForm = ({ ticketTypes, onTicketUpdate }: TicketFormProps) => {
     const price = parseFloat(formData.price) * 100;
     const total = parseInt(formData.total);
 
-    if (price <= 0 || total <= 0) {
+    if (isNaN(price) || isNaN(total) || price <= 0 || total <= 0) {
       toast({
-        title: "Price and total must be greater than 0",
+        title: "Invalid price or total amount",
+        description: "Please enter valid numbers greater than 0",
         variant: "destructive"
       });
       return;
@@ -72,11 +81,13 @@ const TicketForm = ({ ticketTypes, onTicketUpdate }: TicketFormProps) => {
         if (ticket.id === editingTicket.id) {
           const soldTickets = ticket.total - ticket.available;
           const newAvailable = Math.max(0, total - soldTickets);
-          
           return {
             ...ticket,
             name: formData.name,
             price,
+            date: formData.date,
+            time: formData.time,
+            location: formData.location,
             description: formData.description,
             total,
             available: newAvailable
@@ -84,33 +95,32 @@ const TicketForm = ({ ticketTypes, onTicketUpdate }: TicketFormProps) => {
         }
         return ticket;
       });
-      
       onTicketUpdate(updatedTickets);
-      
-      toast({
-        title: "Ticket type updated successfully"
-      });
+      toast({ title: "Ticket type updated successfully" });
     } else {
       const newTicket: TicketType = {
-        id: Date.now().toString(),
+        id: `temp_${Date.now()}`,
         name: formData.name,
         price,
+        date: formData.date,
+        time: formData.time,
+        location: formData.location,
         description: formData.description,
         total,
         available: total
       };
-
       const updatedTickets = [...ticketTypes, newTicket];
       onTicketUpdate(updatedTickets);
-      
-      toast({
-        title: "Ticket type added successfully"
-      });
+      toast({ title: "Ticket type added successfully" });
     }
-
     setIsDialogOpen(false);
     resetForm();
   };
+
+  // Expose handleEdit to parent component
+  if (typeof window !== 'undefined') {
+    (window as any).handleEdit = handleEdit;
+  }
 
   return (
     <>
@@ -133,6 +143,7 @@ const TicketForm = ({ ticketTypes, onTicketUpdate }: TicketFormProps) => {
               {editingTicket ? 'Update the ticket type details' : 'Create a new ticket type for your event'}
             </DialogDescription>
           </DialogHeader>
+          
           <form onSubmit={handleSubmit}>
             <div className="space-y-4 py-4">
               <div>
@@ -156,6 +167,33 @@ const TicketForm = ({ ticketTypes, onTicketUpdate }: TicketFormProps) => {
                 />
               </div>
               <div>
+                <Label htmlFor="date">Date</Label>
+                <Input
+                  id="date"
+                  type="date"
+                  value={formData.date}
+                  onChange={(e) => setFormData({...formData, date: e.target.value})}
+                />
+              </div>
+              <div>
+                <Label htmlFor="time">Time</Label>
+                <Input
+                  id="time"
+                  type="time"
+                  value={formData.time}
+                  onChange={(e) => setFormData({...formData, time: e.target.value})}
+                />
+              </div>
+              <div>
+                <Label htmlFor="location">Location</Label>
+                <Input
+                  id="location"
+                  value={formData.location}
+                  onChange={(e) => setFormData({...formData, location: e.target.value})}
+                  placeholder="Event location"
+                />
+              </div>
+              <div>
                 <Label htmlFor="description">Description</Label>
                 <Input
                   id="description"
@@ -175,6 +213,7 @@ const TicketForm = ({ ticketTypes, onTicketUpdate }: TicketFormProps) => {
                 />
               </div>
             </div>
+            
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                 Cancel
