@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -65,6 +64,8 @@ const PaymentGatewaySettings = () => {
         .upsert({ 
           key: 'paystack_public_key', 
           value: publicKey.trim() 
+        }, {
+          onConflict: 'key'
         });
 
       // Upsert secret key
@@ -73,6 +74,8 @@ const PaymentGatewaySettings = () => {
         .upsert({ 
           key: 'paystack_secret_key', 
           value: secretKey.trim() 
+        }, {
+          onConflict: 'key'
         });
 
       if (publicKeyError || secretKeyError) {
