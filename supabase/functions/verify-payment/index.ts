@@ -15,14 +15,8 @@ function generateTicketNumber(purchaseId: string): string {
 
 // Generate QR code data
 function generateQRCodeData(ticketNumber: string, purchaseReference: string) {
-  const baseUrl = Deno.env.get('FRONTEND_URL') || 'http://localhost:8080';
-  const verificationUrl = `${baseUrl}/verify-ticket/${ticketNumber}`;
-  
-  return JSON.stringify({
-    ticketNumber,
-    purchaseReference,
-    verificationUrl
-  });
+  // Use a simple, consistent format that's easy to scan
+  return `TICKET:${ticketNumber}`;
 }
 
 interface Ticket {
@@ -61,6 +55,12 @@ function validateTicket(ticket: Ticket): string | null {
   if (!ticket.status) return 'Status is required';
   if (!ticket.created_at) return 'Created at timestamp is required';
   if (!ticket.updated_at) return 'Updated at timestamp is required';
+  
+  // Validate QR code format
+  if (!ticket.qr_code.startsWith('TICKET:')) {
+    return 'Invalid QR code format';
+  }
+  
   return null;
 }
 

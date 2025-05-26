@@ -56,13 +56,17 @@ export function TicketDisplay({ tickets, purchaseReference }: TicketDisplayProps
     const dataURLs: Record<string, string> = {};
     for (const ticket of tickets) {
       try {
-        const dataURL = await QRCode.toDataURL(ticket.qrCode, {
+        // Format the QR code data in the new format
+        const qrCodeData = `TICKET:${ticket.ticketNumber}`;
+        
+        const dataURL = await QRCode.toDataURL(qrCodeData, {
           width: 200,
           margin: 2,
           color: {
             dark: '#000000',
             light: '#ffffff'
-          }
+          },
+          errorCorrectionLevel: 'H' // High error correction level for better scanning
         });
         dataURLs[ticket.ticketNumber] = dataURL;
       } catch (error) {
