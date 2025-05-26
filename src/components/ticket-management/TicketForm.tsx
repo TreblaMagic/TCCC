@@ -18,9 +18,6 @@ const TicketForm = ({ ticketTypes, onTicketUpdate }: TicketFormProps) => {
   const [formData, setFormData] = useState({
     name: '',
     price: '',
-    date: '',
-    time: '',
-    location: '',
     description: '',
     total: ''
   });
@@ -30,9 +27,6 @@ const TicketForm = ({ ticketTypes, onTicketUpdate }: TicketFormProps) => {
     setFormData({
       name: '',
       price: '',
-      date: '',
-      time: '',
-      location: '',
       description: '',
       total: ''
     });
@@ -44,9 +38,6 @@ const TicketForm = ({ ticketTypes, onTicketUpdate }: TicketFormProps) => {
     setFormData({
       name: ticket.name,
       price: (ticket.price / 100).toString(),
-      date: ticket.date || '',
-      time: ticket.time || '',
-      location: ticket.location || '',
       description: ticket.description,
       total: ticket.total.toString()
     });
@@ -56,7 +47,7 @@ const TicketForm = ({ ticketTypes, onTicketUpdate }: TicketFormProps) => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.name || !formData.price || !formData.date || !formData.time || !formData.location || !formData.description || !formData.total) {
+    if (!formData.name || !formData.price || !formData.description || !formData.total) {
       toast({
         title: "Please fill all fields",
         variant: "destructive"
@@ -85,9 +76,6 @@ const TicketForm = ({ ticketTypes, onTicketUpdate }: TicketFormProps) => {
             ...ticket,
             name: formData.name,
             price,
-            date: formData.date,
-            time: formData.time,
-            location: formData.location,
             description: formData.description,
             total,
             available: newAvailable
@@ -102,9 +90,6 @@ const TicketForm = ({ ticketTypes, onTicketUpdate }: TicketFormProps) => {
         id: `temp_${Date.now()}`,
         name: formData.name,
         price,
-        date: formData.date,
-        time: formData.time,
-        location: formData.location,
         description: formData.description,
         total,
         available: total
@@ -164,33 +149,6 @@ const TicketForm = ({ ticketTypes, onTicketUpdate }: TicketFormProps) => {
                   value={formData.price}
                   onChange={(e) => setFormData({...formData, price: e.target.value})}
                   placeholder="0.00"
-                />
-              </div>
-              <div>
-                <Label htmlFor="date">Date</Label>
-                <Input
-                  id="date"
-                  type="date"
-                  value={formData.date}
-                  onChange={(e) => setFormData({...formData, date: e.target.value})}
-                />
-              </div>
-              <div>
-                <Label htmlFor="time">Time</Label>
-                <Input
-                  id="time"
-                  type="time"
-                  value={formData.time}
-                  onChange={(e) => setFormData({...formData, time: e.target.value})}
-                />
-              </div>
-              <div>
-                <Label htmlFor="location">Location</Label>
-                <Input
-                  id="location"
-                  value={formData.location}
-                  onChange={(e) => setFormData({...formData, location: e.target.value})}
-                  placeholder="Event location"
                 />
               </div>
               <div>
