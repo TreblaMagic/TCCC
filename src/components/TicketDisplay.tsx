@@ -2,11 +2,9 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Download } from 'lucide-react';
-import { QRCodeSVG } from 'qrcode.react';
 import { useToast } from '@/hooks/use-toast';
 import { PDFDownloadLink } from '@react-pdf/renderer';
 import { TicketPDF } from './TicketPDF';
-import QRCode from 'qrcode';
 import { supabase } from '@/lib/supabase';
 
 interface Ticket {
@@ -56,15 +54,33 @@ export function TicketDisplay({ tickets, purchaseReference }: TicketDisplayProps
     const dataURLs: Record<string, string> = {};
     for (const ticket of tickets) {
       try {
-        const dataURL = await QRCode.toDataURL(ticket.qrCode, {
-          width: 200,
-          margin: 2,
-          color: {
-            dark: '#000000',
-            light: '#ffffff'
-          }
+        console.log('Generating QR code for ticket:', ticket);
+        console.log('Ticket QR code data:', JSON.stringify(ticket.qrCode, null, 2));
+        
+        // Ensure we have valid ticket data
+        if (!ticket.qrCode) {
+          console.error('No QR code data for ticket:', ticket);
+          continue;
+        }
+
+        // Use our Edge Function to get base64 image data
+        const response = await supabase.functions.invoke('generate-qr-code', {
+          body: { data: typeof ticket.qrCode === 'string' ? ticket.qrCode : JSON.stringify(ticket.qrCode) }
         });
-        dataURLs[ticket.ticketNumber] = dataURL;
+
+        console.log('Edge Function response:', response);
+
+        if (response.error) {
+          console.error('Edge Function error:', response.error);
+          throw response.error;
+        }
+
+        if (!response.data?.imageData) {
+          console.error('Invalid response data:', response.data);
+          throw new Error('No image data received from QR code generation');
+        }
+
+        dataURLs[ticket.ticketNumber] = response.data.imageData;
       } catch (error) {
         console.error('Error generating QR code:', error);
         toast({
@@ -74,6 +90,7 @@ export function TicketDisplay({ tickets, purchaseReference }: TicketDisplayProps
         });
       }
     }
+    console.log('Final QR code URLs:', dataURLs);
     setQrCodeDataURLs(dataURLs);
   };
 
@@ -97,11 +114,20 @@ export function TicketDisplay({ tickets, purchaseReference }: TicketDisplayProps
             <CardContent className="space-y-4">
               <div className="text-center">
                 <div className="inline-block p-4 bg-white rounded-lg shadow-sm">
-                  <QRCodeSVG
-                    value={ticket.qrCode}
-                    size={200}
-                    level="H"
-                    includeMargin={true}
+                  <img
+                    src={qrCodeDataURLs[ticket.ticketNumber]}
+                    alt={`QR Code for ticket ${ticket.ticketNumber}`}
+                    width={200}
+                    height={200}
+                    className="w-[200px] h-[200px]"
+                    onError={(e) => {
+                      console.error('Error loading QR code image:', e);
+                      toast({
+                        title: "Error",
+                        description: "Failed to load QR code image. Please try again.",
+                        variant: "destructive"
+                      });
+                    }}
                   />
                 </div>
               </div>
