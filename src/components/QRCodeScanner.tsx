@@ -15,9 +15,10 @@ interface QRCodeScannerProps {
 const QRCodeScanner = ({ onScan, onError, isActive, onClose }: QRCodeScannerProps) => {
   const [scanner, setScanner] = useState<Html5QrcodeScanner | null>(null);
   const scannerRef = useRef<HTMLDivElement>(null);
+  const hasScanned = useRef(false);
 
   useEffect(() => {
-    if (isActive && scannerRef.current) {
+    if (isActive && scannerRef.current && !hasScanned.current) {
       const config = {
         fps: 10,
         qrbox: { width: 250, height: 250 },
@@ -31,9 +32,13 @@ const QRCodeScanner = ({ onScan, onError, isActive, onClose }: QRCodeScannerProp
       );
 
       html5QrcodeScanner.render(
-        (decodedText) => {
-          onScan(decodedText);
-          html5QrcodeScanner.clear();
+        async (decodedText) => {
+          if (!hasScanned.current) {
+            hasScanned.current = true;
+            await html5QrcodeScanner.clear();
+            onScan(decodedText);
+            onClose();
+          }
         },
         (errorMessage) => {
           console.log("QR scan error:", errorMessage);
@@ -45,14 +50,16 @@ const QRCodeScanner = ({ onScan, onError, isActive, onClose }: QRCodeScannerProp
 
       return () => {
         html5QrcodeScanner.clear().catch(console.error);
+        hasScanned.current = false;
       };
     }
-  }, [isActive, onScan, onError]);
+  }, [isActive, onScan, onError, onClose]);
 
   const handleClose = () => {
     if (scanner) {
       scanner.clear().catch(console.error);
     }
+    hasScanned.current = false;
     onClose();
   };
 
