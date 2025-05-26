@@ -60,6 +60,8 @@ serve(async (req) => {
       data: {
         ticketNumber: ticket.ticket_number,
         status: ticket.status,
+        validated: ticket.validated,
+        validatedAt: ticket.validated ? ticket.updated_at : null,
         purchaseDate: ticket.purchase.created_at,
         customerInfo: ticket.purchase.customer_info,
         ticketType: ticket.ticket_type.name,

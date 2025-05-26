@@ -158,26 +158,31 @@ const QRScanner = () => {
       setIsLoading(true);
       setError(null);
 
-      // Fetch the ticket by ticket_number
+      // Fetch the specific ticket by ticket_number
       const { data: ticket, error: ticketError } = await supabase
         .from('tickets')
         .select(`
           *,
-          purchase:purchases (
+          ticket_type:ticket_types (
             id,
-            reference,
-            customer_info,
-            items,
-            total_amount,
-            status,
-            created_at,
-            entries_used
+            name,
+            price
           )
         `)
         .eq('ticket_number', codeToScan)
         .single();
 
-      if (ticketError || !ticket) {
+      if (ticketError) {
+        console.error('Error fetching ticket:', ticketError);
+        setScanResult({
+          type: 'error',
+          purchase: null,
+          message: `Error fetching ticket: ${ticketError.message}`
+        });
+        return;
+      }
+
+      if (!ticket) {
         setScanResult({
           type: 'error',
           purchase: null,
@@ -186,41 +191,97 @@ const QRScanner = () => {
         return;
       }
 
-      const customerInfo = JSON.parse(JSON.stringify(ticket.purchase.customer_info));
-      const items = JSON.parse(JSON.stringify(ticket.purchase.items));
-
-      if (!isCustomerInfo(customerInfo) || !isCartItemArray(items)) {
+      // Check if ticket is already validated
+      if (ticket.validated) {
         setScanResult({
           type: 'error',
           purchase: null,
-          message: 'Ticket data is invalid.'
+          message: 'This ticket has already been used.'
         });
         return;
       }
 
+      // Validate the ticket
+      const { data: validationResult, error: validationError } = await supabase
+        .rpc('validate_ticket', {
+          ticket_id: ticket.id,
+          purchase_id: ticket.purchase_id
+        });
+
+      if (validationError) {
+        console.error('Validation error:', validationError);
+        setScanResult({
+          type: 'error',
+          purchase: null,
+          message: `Validation error: ${validationError.message}`
+        });
+        return;
+      }
+
+      if (!validationResult) {
+        setScanResult({
+          type: 'error',
+          purchase: null,
+          message: 'No validation result received'
+        });
+        return;
+      }
+
+      if (validationResult.status === 'error') {
+        setScanResult({
+          type: 'error',
+          purchase: null,
+          message: validationResult.message || 'Validation failed'
+        });
+        return;
+      }
+
+      // Create a simplified purchase object for display
       const purchase: Purchase = {
-        id: ticket.purchase.id,
-        reference: ticket.purchase.reference,
-        customerInfo,
-        items,
-        totalAmount: ticket.purchase.total_amount as number,
-        status: ticket.purchase.status as 'completed' | 'pending' | 'failed',
-        createdAt: new Date(ticket.purchase.created_at),
-        usedTickets: ticket.purchase.entries_used || 0,
+        id: ticket.purchase_id,
+        reference: ticket.ticket_number,
+        customerInfo: {
+          name: 'Ticket Holder',
+          email: 'N/A',
+          phone: 'N/A'
+        },
+        items: [{
+          ticketType: {
+            id: ticket.ticket_type.id,
+            name: ticket.ticket_type.name,
+            price: ticket.ticket_type.price,
+            description: '',
+            available: 0,
+            total: 0
+          },
+          quantity: 1
+        }],
+        totalAmount: ticket.ticket_type.price,
+        status: 'completed',
+        createdAt: new Date(ticket.created_at),
+        usedTickets: 1,
         qrCode: ticket.qr_code
       };
 
       setScanResult({
         type: 'success',
         purchase,
-        message: 'Ticket found!'
+        message: 'Ticket validated successfully!'
       });
+
+      toast({
+        title: "Ticket Validated",
+        description: "Entry has been recorded successfully.",
+      });
+
+      // Reload purchases to update stats
+      await loadPurchases();
     } catch (error) {
-      console.error('Error fetching ticket:', error);
+      console.error('Error validating ticket:', error);
       setScanResult({
         type: 'error',
         purchase: null,
-        message: 'An error occurred while fetching the ticket.'
+        message: error instanceof Error ? error.message : 'An error occurred while validating the ticket.'
       });
     } finally {
       setIsLoading(false);

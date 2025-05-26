@@ -39,6 +39,18 @@ export interface PaystackResponse {
   reference: string;
 }
 
+export interface Ticket {
+  id: string;
+  ticket_number: string;
+  qr_code: string;
+  purchase_id: string;
+  ticket_type_id: string;
+  status: 'valid' | 'used' | 'invalid';
+  validated: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 // Type guards for JSON data
 export function isCustomerInfo(data: unknown): data is CustomerInfo {
   if (typeof data !== 'object' || data === null) return false;

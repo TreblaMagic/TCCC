@@ -235,6 +235,7 @@ serve(async (req) => {
         for (const item of purchase.items) {
           console.log('Processing item:', JSON.stringify(item, null, 2));
           
+          // Create one ticket for each quantity of this ticket type
           for (let i = 0; i < item.quantity; i++) {
             const ticketNumber = generateTicketNumber(purchase.id);
             const qrCodeData = generateQRCodeData(ticketNumber, purchase.reference);
@@ -245,6 +246,7 @@ serve(async (req) => {
               purchase_id: purchase.id,
               ticket_type_id: item.ticketType.id,
               status: 'valid',
+              validated: false,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
             };

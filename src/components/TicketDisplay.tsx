@@ -1,14 +1,23 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Download, QrCode } from 'lucide-react';
+import { Download } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
+import { useToast } from '@/hooks/use-toast';
+import { PDFDownloadLink } from '@react-pdf/renderer';
+import { TicketPDF } from './TicketPDF';
+import QRCode from 'qrcode';
+import { supabase } from '@/lib/supabase';
 
 interface Ticket {
   ticketNumber: string;
   qrCode: string;
+}
+
+interface EventDetails {
+  event_name: string;
+  event_date: string;
+  venue: string;
 }
 
 interface TicketDisplayProps {
@@ -17,34 +26,60 @@ interface TicketDisplayProps {
 }
 
 export function TicketDisplay({ tickets, purchaseReference }: TicketDisplayProps) {
-  const [downloading, setDownloading] = useState(false);
+  const { toast } = useToast();
+  const [qrCodeDataURLs, setQrCodeDataURLs] = useState<Record<string, string>>({});
+  const [eventDetails, setEventDetails] = useState<EventDetails | null>(null);
 
-  const downloadTicket = async (ticket: Ticket) => {
-    setDownloading(true);
+  useEffect(() => {
+    loadEventDetails();
+    generateQRCodeDataURLs();
+  }, [tickets]);
+
+  const loadEventDetails = async () => {
     try {
-      const ticketElement = document.getElementById(`ticket-${ticket.ticketNumber}`);
-      if (!ticketElement) return;
+      const { data, error } = await supabase
+        .rpc('get_current_event_details');
 
-      const canvas = await html2canvas(ticketElement);
-      const imgData = canvas.toDataURL('image/png');
-      
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-      });
-
-      const imgWidth = 210; // A4 width in mm
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      
-      pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
-      pdf.save(`ticket-${ticket.ticketNumber}.pdf`);
+      if (error) throw error;
+      setEventDetails(data);
     } catch (error) {
-      console.error('Error downloading ticket:', error);
-    } finally {
-      setDownloading(false);
+      console.error('Error loading event details:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load event details. Please try again.",
+        variant: "destructive"
+      });
     }
   };
+
+  const generateQRCodeDataURLs = async () => {
+    const dataURLs: Record<string, string> = {};
+    for (const ticket of tickets) {
+      try {
+        const dataURL = await QRCode.toDataURL(ticket.qrCode, {
+          width: 200,
+          margin: 2,
+          color: {
+            dark: '#000000',
+            light: '#ffffff'
+          }
+        });
+        dataURLs[ticket.ticketNumber] = dataURL;
+      } catch (error) {
+        console.error('Error generating QR code:', error);
+        toast({
+          title: "Error",
+          description: "Failed to generate QR code for ticket. Please try again.",
+          variant: "destructive"
+        });
+      }
+    }
+    setQrCodeDataURLs(dataURLs);
+  };
+
+  if (!eventDetails) {
+    return <div>Loading event details...</div>;
+  }
 
   return (
     <div className="space-y-6">
@@ -55,9 +90,9 @@ export function TicketDisplay({ tickets, purchaseReference }: TicketDisplayProps
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {tickets.map((ticket) => (
-          <Card key={ticket.ticketNumber} id={`ticket-${ticket.ticketNumber}`} className="relative">
+          <Card key={ticket.ticketNumber} className="relative">
             <CardHeader>
-              <CardTitle className="text-center">Tech Conference 2024</CardTitle>
+              <CardTitle className="text-center">{eventDetails.event_name}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="text-center">
@@ -78,18 +113,43 @@ export function TicketDisplay({ tickets, purchaseReference }: TicketDisplayProps
 
               <div className="text-center space-y-2">
                 <p className="font-semibold">Event Details</p>
-                <p>December 15, 2024</p>
-                <p>Lagos Convention Center</p>
+                <p>{new Date(eventDetails.event_date).toLocaleDateString()}</p>
+                <p>{eventDetails.venue}</p>
               </div>
 
-              <Button
-                className="w-full"
-                onClick={() => downloadTicket(ticket)}
-                disabled={downloading}
-              >
-                <Download className="w-4 h-4 mr-2" />
-                {downloading ? 'Downloading...' : 'Download Ticket'}
-              </Button>
+              {qrCodeDataURLs[ticket.ticketNumber] && (
+                <PDFDownloadLink
+                  document={
+                    <TicketPDF
+                      ticket={ticket}
+                      purchaseReference={purchaseReference}
+                      qrCodeDataURL={qrCodeDataURLs[ticket.ticketNumber]}
+                      eventDetails={eventDetails}
+                    />
+                  }
+                  fileName={`ticket-${ticket.ticketNumber}.pdf`}
+                  className="w-full"
+                >
+                  {({ loading, error }) => {
+                    if (error) {
+                      toast({
+                        title: "Error",
+                        description: "Failed to generate PDF. Please try again.",
+                        variant: "destructive"
+                      });
+                    }
+                    return (
+                      <Button
+                        className="w-full"
+                        disabled={loading}
+                      >
+                        <Download className="w-4 h-4 mr-2" />
+                        {loading ? 'Generating PDF...' : 'Download Ticket'}
+                      </Button>
+                    );
+                  }}
+                </PDFDownloadLink>
+              )}
             </CardContent>
           </Card>
         ))}

@@ -156,7 +156,7 @@ const TicketManagement = () => {
         .from('purchases')
         .select('id')
         .eq('status', 'completed')
-        .contains('items', [{ ticketType: { id: ticketId } }])
+        .contains('items', JSON.stringify([{ ticketType: { id: ticketId } }]))
         .limit(1);
 
       if (purchaseError) {

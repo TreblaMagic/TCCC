@@ -3,11 +3,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TicketType, Purchase } from '@/types/ticketing';
-import { Ticket, DollarSign, Users, TrendingUp, Settings, RefreshCw } from 'lucide-react';
+import { Ticket, DollarSign, Users, TrendingUp, Settings, RefreshCw, Calendar } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import AdminNav from '@/components/AdminNav';
 import PaymentGatewaySettings from '@/components/PaymentGatewaySettings';
+import { EventDetailsForm } from '@/components/admin/EventDetailsForm';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 
@@ -173,6 +174,10 @@ const AdminDashboard = () => {
           <Tabs defaultValue="overview" className="space-y-6">
             <TabsList>
               <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="event">
+                <Calendar className="w-4 h-4 mr-2" />
+                Event Details
+              </TabsTrigger>
               <TabsTrigger value="settings">
                 <Settings className="w-4 h-4 mr-2" />
                 Payment Gateway
@@ -333,6 +338,10 @@ const AdminDashboard = () => {
                   </CardContent>
                 </Card>
               </div>
+            </TabsContent>
+
+            <TabsContent value="event">
+              <EventDetailsForm />
             </TabsContent>
 
             <TabsContent value="settings">

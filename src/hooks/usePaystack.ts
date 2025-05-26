@@ -33,7 +33,7 @@ export const usePaystack = () => {
       const handler = window.PaystackPop.setup({
         key: config.publicKey,
         email: config.email,
-        amount: config.amount * 100, // Convert to kobo
+        amount: config.amount, // Convert to kobo
         ref: config.reference,
         currency: 'NGN',
         callback: function(response: PaystackResponse) {
