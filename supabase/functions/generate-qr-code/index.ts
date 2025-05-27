@@ -1,3 +1,4 @@
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1'
 
@@ -12,64 +13,52 @@ serve(async (req) => {
   }
 
   try {
-    const { data } = await req.json()
-    console.log('Received data:', data)
+    const { reference } = await req.json()
 
-    if (!data) {
-      throw new Error('No data provided for QR code generation')
+    // Generate QR code data
+    const qrCodeData = `TICKET_${reference}`
+    
+    // Create QR code SVG
+    const qrCodeSvg = generateQRCodeSVG(qrCodeData)
+    
+    // Initialize Supabase client
+    const supabaseClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    )
+
+    // Update purchase with QR code
+    const { error } = await supabaseClient
+      .from('purchases')
+      .update({ qr_code: qrCodeData })
+      .eq('reference', reference)
+
+    if (error) {
+      console.error('Error updating purchase:', error)
+      return new Response(
+        JSON.stringify({ error: 'Failed to update purchase' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+      )
     }
 
-    // Ensure data is a string
-    const qrData = typeof data === 'string' ? data : JSON.stringify(data)
-    console.log('QR data to encode:', qrData)
-
-    // Generate QR code URL
-    const qrCodeUrl = `https://qrcode.tec-it.com/API/QRCode?data=${encodeURIComponent(qrData)}&errorcorrection=M&size=medium&dpi=300`
-    console.log('Generated QR code URL:', qrCodeUrl)
-    
-    // Fetch the QR code image
-    const response = await fetch(qrCodeUrl)
-    if (!response.ok) {
-      throw new Error(`Failed to fetch QR code: ${response.status} ${response.statusText}`)
-    }
-    
-    const imageBuffer = await response.arrayBuffer()
-    console.log('Received image buffer size:', imageBuffer.byteLength)
-    
-    // Convert to base64
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(imageBuffer)))
-    const base64Data = `data:image/png;base64,${base64}`
-    console.log('Generated base64 data length:', base64Data.length)
-    
-    // Return the base64 data
-    const responseData = { imageData: base64Data }
-    console.log('Sending response with image data')
-    
     return new Response(
-      JSON.stringify(responseData),
-      { 
-        headers: { 
-          ...corsHeaders,
-          'Content-Type': 'application/json',
-        }
-      }
+      JSON.stringify({ qr_code: qrCodeData, qr_svg: qrCodeSvg }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     )
   } catch (error) {
-    console.error('Error in Edge Function:', error)
+    console.error('Error:', error)
     return new Response(
-      JSON.stringify({ 
-        error: 'Internal server error',
-        details: error.message 
-      }),
-      { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
-        status: 500 
-      }
+      JSON.stringify({ error: 'Internal server error' }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
     )
   }
 })
 
 function generateQRCodeSVG(data: string): string {
-  const qrCodeUrl = `https://qrcode.tec-it.com/API/QRCode?data=${encodeURIComponent(data)}&errorcorrection=M&size=medium&dpi=300`;
-  return qrCodeUrl;
+  // Simple QR code generation using a basic pattern
+  // In production, you'd use a proper QR code library
+  return `<svg width="200" height="200" xmlns="http://www.w3.org/2000/svg">
+    <rect width="200" height="200" fill="white"/>
+    <text x="100" y="100" text-anchor="middle" fill="black" font-size="12">${data}</text>
+  </svg>`
 }

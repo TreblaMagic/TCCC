@@ -1,4 +1,5 @@
 import { Document, Page, Text, View, StyleSheet, Font, Image } from '@react-pdf/renderer';
+import QRCode from 'qrcode';
 
 // Register fonts
 Font.register({
@@ -70,13 +71,11 @@ interface EventDetails {
   venue: string;
 }
 
-interface Ticket {
-  ticketNumber: string;
-  qrCode: string;
-}
-
 interface TicketPDFProps {
-  ticket: Ticket;
+  ticket: {
+    ticketNumber: string;
+    qrCode: string;
+  };
   purchaseReference: string;
   qrCodeDataURL: string;
   eventDetails: EventDetails;
@@ -102,10 +101,7 @@ export const TicketPDF = ({ ticket, purchaseReference, qrCodeDataURL, eventDetai
       </View>
 
       <View style={styles.qrCode}>
-        <Image 
-          src={qrCodeDataURL}
-          style={{ width: 200, height: 200 }}
-        />
+        <Image src={qrCodeDataURL} />
       </View>
 
       <Text style={styles.footer}>
